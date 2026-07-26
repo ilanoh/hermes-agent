@@ -36,3 +36,22 @@ def test_bridge_env_drops_operator_credentials_keeps_bridge_config(operator_env)
     assert env["WHATSAPP_REPLY_PREFIX"] == "Bot: "
     assert env["HERMES_IMAGE_CACHE_DIR"] and env["HERMES_DOCUMENT_CACHE_DIR"] and env["HERMES_AUDIO_CACHE_DIR"]
     assert env.get("PATH")
+
+
+def test_bridge_env_keeps_inbound_webhook_and_spool_settings(operator_env, monkeypatch, tmp_path):
+    from plugins.platforms.whatsapp.adapter import WhatsAppAdapter
+
+    settings = {
+        "WHATSAPP_INBOUND_WEBHOOK_URL": "https://ops.example/whatsapp/inbound",
+        "WHATSAPP_INBOUND_WEBHOOK_NUMBERS_URL": "https://ops.example/whatsapp/numbers",
+        "WHATSAPP_INBOUND_WEBHOOK_SECRET": "inbound-webhook-secret",
+        "WHATSAPP_INBOUND_WHISPER_PYTHON": str(tmp_path / "venv" / "bin" / "python"),
+        "WHATSAPP_INBOUND_WHISPER_MODEL": str(tmp_path / "model"),
+        "WHATSAPP_BRIDGE_SPOOL_DIR": str(tmp_path / "spool"),
+    }
+    for key, value in settings.items():
+        monkeypatch.setenv(key, value)
+
+    env = WhatsAppAdapter(PlatformConfig(enabled=True))._bridge_env()
+
+    assert {key: env.get(key) for key in settings} == settings
