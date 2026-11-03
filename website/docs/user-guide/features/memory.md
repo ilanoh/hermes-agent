@@ -360,8 +360,14 @@ cannot by default: its tool whitelist denies those write tools, so its saves
 reach the gate unless you name one in `auxiliary.background_review.extra_tools`
 (see [below](#allowing-a-narrowly-scoped-extra-review-tool-extra_tools)).
 
-A staged `patch` or `remove` (the background review stages these even with the
-gate off) records the full entry it targets, and `/memory pending` shows it.
+A staged `patch` or `remove` records the full entry it targets, and
+`/memory pending` shows it. Background review stages these by default even with
+`write_approval: false`. On this local install, operators can explicitly allow
+automatic background consolidation with
+`hermes config set memory.background_consolidation_approval false`.
+The general `memory.write_approval` gate still applies; set both gates to false
+for automatic memory additions, patches and removals. Store validation,
+size limits and atomic batch protection remain enabled.
 Approval applies to exactly that entry: if it changed after the write was staged,
 the write is refused and stays pending for you to reject. A `replace`/`patch`/`remove`
 staged before this pinning existed has no verifiable target and is refused too:
