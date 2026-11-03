@@ -37,6 +37,7 @@ import { createOutboundIdTracker } from './outbound_ids.js';
 import { createHistoryRequests } from './history_requests.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
 import { bridgeAuthProof, createBridgeAuthMiddleware } from './bridge_auth.js';
+import { resolveSendablePath } from './bridge_access.js';
 import {
   addMentions,
   buildPollPayload,
@@ -1030,11 +1031,17 @@ app.post('/send-media', async (req, res) => {
   }
 
   try {
-    if (!existsSync(filePath)) {
-      return res.status(404).json({ error: `File not found: ${filePath}` });
+    // With a spool folder (bridge_access.js), anything outside it gets one
+    // answer whether it exists or not, so the route is no file existence oracle.
+    const spoolDir = process.env.WHATSAPP_BRIDGE_SPOOL_DIR || '';
+    const sendablePath = resolveSendablePath(filePath, spoolDir);
+    if (!sendablePath) {
+      return spoolDir
+        ? res.status(400).json({ error: 'filePath must be a file of the spool folder' })
+        : res.status(404).json({ error: `File not found: ${filePath}` });
     }
 
-    const buffer = readFileSync(filePath);
+    const buffer = readFileSync(sendablePath);
     const ext = filePath.toLowerCase().split('.').pop();
     const type = mediaType || inferMediaType(ext);
     let msgPayload;
@@ -1051,7 +1058,7 @@ app.post('/send-media', async (req, res) => {
             tmpGifMp4 = path.join(tmpdir(), `hermes_gif_${randomBytes(6).toString('hex')}.mp4`);
             execFileSync(
               'ffmpeg',
-              ['-y', '-i', filePath, '-movflags', 'faststart', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', tmpGifMp4],
+              ['-y', '-i', sendablePath, '-movflags', 'faststart', '-pix_fmt', 'yuv420p', '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', tmpGifMp4],
               { timeout: 30000, stdio: 'pipe' }
             );
             msgPayload = {
@@ -1086,7 +1093,7 @@ app.post('/send-media', async (req, res) => {
           try {
             execFileSync(
               'ffmpeg',
-              ['-y', '-i', filePath, '-ar', '48000', '-ac', '1', '-c:a', 'libopus', tmpPath],
+              ['-y', '-i', sendablePath, '-ar', '48000', '-ac', '1', '-c:a', 'libopus', tmpPath],
               { timeout: 30000, stdio: 'pipe' }
             );
             audioBuffer = readFileSync(tmpPath);

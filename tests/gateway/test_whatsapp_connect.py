@@ -171,7 +171,7 @@ class TestBridgeTokenOffLoop:
         mock_proc.returncode = 1
         on_loop = []
 
-        def mint(session_path, *, rotate=False):
+        def mint(session_path, *, rotate=False, pinned=""):
             try:
                 asyncio.get_running_loop()
                 on_loop.append(True)
@@ -201,7 +201,7 @@ class TestBridgeTokenOffLoop:
         finish_rotate = Event()
         rotate_finished = Event()
 
-        def mint(session_path, *, rotate=False):
+        def mint(session_path, *, rotate=False, pinned=""):
             if rotate:
                 rotate_started.set()
                 try:
@@ -738,7 +738,8 @@ class TestLoggedOutBridgeExit:
 
         with patch("plugins.platforms.whatsapp.adapter.asyncio.sleep", new_callable=AsyncMock):
             assert await adapter._wait_for_bridge() is False
-        assert adapter.has_fatal_error is False
+        assert adapter.fatal_error_code == "whatsapp_bridge_exited"
+        assert adapter.fatal_error_retryable is True
 
     def test_bridge_and_adapter_share_the_exit_code(self):
         import re
