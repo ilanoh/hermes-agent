@@ -32,6 +32,7 @@ import { tmpdir } from 'os';
 import qrcode from 'qrcode-terminal';
 import { matchesAllowedSender, matchesAllowedUser, matchesInboundWhatsAppGroup, parseAllowedUsers } from './allowlist.js';
 import { createOutboundIdTracker } from './outbound_ids.js';
+import { createHistoryRequests } from './history_requests.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
 import {
   addMentions,
@@ -256,6 +257,9 @@ const logger = pino({ level: 'warn' });
 // Message queue for polling
 const messageQueue = [];
 const MAX_QUEUE_SIZE = 100;
+// Exit code read by the Python adapter (_BRIDGE_LOGGED_OUT_EXIT_CODE): WhatsApp unlinked this device,
+// so only a new pairing recovers the session and the gateway must stop reconnecting.
+const LOGGED_OUT_EXIT_CODE = 78;
 
 // Track recently sent message IDs.  Two purposes:
 //   1. Prevent echo-back loops with media in self-chat mode.
@@ -267,6 +271,9 @@ const MAX_QUEUE_SIZE = 100;
 const recentlySentIds = createOutboundIdTracker(512);
 const recentlyProcessedPollUpdates = createOutboundIdTracker(512);
 const messageStore = createBoundedMessageStore(512);
+const historyRequests = createHistoryRequests();
+// HistorySync.HistorySyncType.ON_DEMAND: the phone's answer to fetchMessageHistory.
+const HISTORY_SYNC_ON_DEMAND = 6;
 // Bounded cache of already-downloaded inbound media, so a later reply to an
 // uncaptioned photo/video/document/voice note can still surface the original
 // file — see createQuotedMediaCache's doc comment in bridge_helpers.js.
@@ -410,6 +417,11 @@ async function startSocket() {
   });
 
   sock.ev.on('creds.update', () => { saveCreds(); lidToPhone = buildLidMap(); });
+  sock.ev.on('messaging-history.set', ({ messages, syncType }) => {
+    if (syncType === HISTORY_SYNC_ON_DEMAND) {
+      historyRequests.deliver(messages);
+    }
+  });
 
   sock.ev.on('connection.update', (update) => {
     const { connection, lastDisconnect, qr } = update;
@@ -434,7 +446,7 @@ async function startSocket() {
         if (!PAIR_JSON) {
           console.log('❌ Logged out. Delete session and restart to re-authenticate.');
         }
-        process.exit(1);
+        process.exit(LOGGED_OUT_EXIT_CODE);
       } else {
         // 515 = restart requested (common after pairing). Always reconnect.
         emitPairEvent({ event: 'disconnected', reason });
@@ -1122,6 +1134,75 @@ app.get('/chat/:id', async (req, res) => {
     isGroup,
     participants: [],
   });
+});
+
+
+// Whether a phone number has a WhatsApp account, before anything is sent to it.
+// Read only: asks WhatsApp, sends nothing. Digits only, country code first.
+app.get('/check/:number', async (req, res) => {
+  if (!sock || connectionState !== 'connected') {
+    return res.status(503).json({ error: 'Not connected to WhatsApp' });
+  }
+  const digits = String(req.params.number || '').replace(/\D/g, '');
+  if (digits.length < 8 || digits.length > 15) {
+    return res.status(400).json({ error: 'number must have 8 to 15 digits, country code first' });
+  }
+  try {
+    const [result] = await sock.onWhatsApp(`${digits}@s.whatsapp.net`);
+    res.json({ number: digits, exists: Boolean(result?.exists), jid: result?.jid || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const HISTORY_MEDIA_KINDS = ['imageMessage', 'audioMessage', 'videoMessage', 'documentMessage'];
+
+/** One history message as JSON: text, and the media bytes when WhatsApp still serves them. */
+async function describeHistoryMessage(msg) {
+  const content = getMessageContent(msg);
+  const mediaKind = HISTORY_MEDIA_KINDS.find((kind) => content[kind]) || '';
+  let media = null;
+  if (mediaKind) {
+    try {
+      const buffer = await downloadMediaMessage(msg, 'buffer', {}, { logger, reuploadRequest: sock.updateMediaMessage });
+      media = {
+        mimetype: content[mediaKind].mimetype || '',
+        fileName: content[mediaKind].fileName || '',
+        base64: buffer.toString('base64'),
+      };
+    } catch (err) {
+      media = { error: err.message };
+    }
+  }
+  return {
+    id: msg.key.id,
+    fromMe: Boolean(msg.key.fromMe),
+    timestamp: Number(String(msg.messageTimestamp || 0)),
+    text: content.conversation || content.extendedTextMessage?.text || content[mediaKind]?.caption || '',
+    mediaKind,
+    media,
+  };
+}
+
+// The messages of one chat sent before an anchor, read from the primary phone.
+// Read only: nothing is sent to the chat. Body: { chatId, count, anchor: { id, fromMe, timestampMs } }.
+app.post('/history', async (req, res) => {
+  if (!sock || connectionState !== 'connected') {
+    return res.status(503).json({ error: 'Not connected to WhatsApp' });
+  }
+  const { chatId, count = 50, anchor } = req.body || {};
+  if (!chatId || !anchor?.id || !anchor?.timestampMs) {
+    return res.status(400).json({ error: 'chatId and anchor { id, fromMe, timestampMs } are required' });
+  }
+  try {
+    const answer = historyRequests.wait(chatId);
+    const key = { remoteJid: chatId, fromMe: Boolean(anchor.fromMe), id: String(anchor.id) };
+    await sock.fetchMessageHistory(Math.min(Number(count) || 50, 50), key, Number(anchor.timestampMs));
+    const messages = await answer;
+    res.json({ messages: await Promise.all(messages.map(describeHistoryMessage)) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Health check
