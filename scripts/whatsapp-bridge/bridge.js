@@ -38,6 +38,7 @@ import { createHistoryRequests } from './history_requests.js';
 import { classifyOwnerMessageGate } from './owner_message_gate.js';
 import { bridgeAuthProof, createBridgeAuthMiddleware } from './bridge_auth.js';
 import { resolveSendablePath } from './bridge_access.js';
+import { checkableNumber } from './phone_check.js';
 import {
   addMentions,
   buildPollPayload,
@@ -1240,13 +1241,13 @@ app.get('/chat/:id', async (req, res) => {
 
 
 // Whether a phone number has a WhatsApp account, before anything is sent to it.
-// Read only: asks WhatsApp, sends nothing. Digits only, country code first.
+// Read only: asks WhatsApp and sends nothing. Digits only, country code first.
 app.get('/check/:number', async (req, res) => {
   if (!sock || connectionState !== 'connected') {
     return res.status(503).json({ error: 'Not connected to WhatsApp' });
   }
-  const digits = String(req.params.number || '').replace(/\D/g, '');
-  if (digits.length < 8 || digits.length > 15) {
+  const digits = checkableNumber(req.params.number);
+  if (!digits) {
     return res.status(400).json({ error: 'number must have 8 to 15 digits, country code first' });
   }
   try {
