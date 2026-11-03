@@ -21,6 +21,8 @@ from gateway.platforms.send_targets import StandaloneSendPolicy, regex_stripped_
 from hermes_cli._subprocess_compat import windows_detach_popen_kwargs
 from hermes_constants import (find_node_executable, get_hermes_dir, with_hermes_node_path)
 
+from . import bridge_access
+
 _IS_WINDOWS = platform.system() == "Windows"
 
 
@@ -232,7 +234,8 @@ def _is_allowed_bridge_path(url: str) -> bool:
         resolved = Path(url).resolve()
     except (OSError, ValueError):
         return False
-    for root in _cache_dirs():
+    media_dir = _wenv(bridge_access.MEDIA_ENV)
+    for root in (*_cache_dirs(), *((media_dir,) if media_dir else ())):
         with suppress(OSError, ValueError):
             if resolved.is_relative_to(Path(root).resolve()):
                 return True
@@ -403,7 +406,8 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
     async def _probe_bridge_health(self) -> tuple[bool, Any]:
         """GET /health with a fresh session → ``(http_200, json)``; unparseable 200 body → ``(True, None)``; connection errors and timeouts propagate."""
         import aiohttp
-        async with aiohttp.ClientSession() as session, session.get(self._bridge_url("health"), timeout=aiohttp.ClientTimeout(total=2)) as resp:
+        async with aiohttp.ClientSession(headers=bridge_access.auth_headers(_wenv(bridge_access.TOKEN_ENV))) as session, \
+                session.get(self._bridge_url("health"), timeout=aiohttp.ClientTimeout(total=2)) as resp:
             if resp.status != 200:
                 return False, None
             try:
@@ -455,7 +459,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
     def _attach_to_bridge(self, managed_process) -> None:
         import aiohttp
         self._bridge_process = managed_process
-        self._http_session = aiohttp.ClientSession()
+        self._http_session = aiohttp.ClientSession(headers=bridge_access.auth_headers(_wenv(bridge_access.TOKEN_ENV)))
         self._poll_task = asyncio.create_task(self._poll_messages())
 
     async def _reuse_running_bridge(self, bridge_path: Path) -> bool:
@@ -493,6 +497,17 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             pass  # Bridge not running, start a new one
         return False
 
+    def _apply_bridge_isolation(self, bridge_env: dict) -> None:
+        """Token, spool folder, media folder and HOME of an isolated bridge (bridge_access.py); unset keys change nothing."""
+        for key in (bridge_access.TOKEN_ENV, bridge_access.SPOOL_ENV):
+            if value := _wenv(key):
+                bridge_env[key] = value
+            else:
+                bridge_env.pop(key, None)
+        bridge_env.update(bridge_access.media_dirs(_wenv(bridge_access.MEDIA_ENV)))
+        if home := bridge_access.bridge_home(_wenv(bridge_access.USER_ENV)):
+            bridge_env["HOME"] = home
+
     def _bridge_env(self) -> dict:
         """Subprocess env: the adapter's EFFECTIVE profile policy + profile-resolved WHATSAPP_* values + cache dirs."""
         # with_hermes_node_path() copies os.environ when called with no arg: under a multiplexed secondary
@@ -525,6 +540,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         # Without these the bridge hardcodes ~/.hermes/{image,audio,document}_cache (wrong under HERMES_HOME/profiles/cache layout).
         img_dir, audio_dir, _video_dir, doc_dir = _cache_dirs()
         bridge_env.update(HERMES_IMAGE_CACHE_DIR=str(img_dir), HERMES_AUDIO_CACHE_DIR=str(audio_dir), HERMES_DOCUMENT_CACHE_DIR=str(doc_dir))
+        self._apply_bridge_isolation(bridge_env)
         return bridge_env
 
     def _bridge_died(self, detail: str, code: str = "whatsapp_bridge_exited") -> bool:
@@ -683,12 +699,13 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
             # Bridge output goes to a log file so QR codes, errors, and reconnection messages survive for troubleshooting.
             self._bridge_log = self._session_path.parent / "bridge.log"
             self._bridge_log_fh = bridge_log_fh = open(self._bridge_log, "a", encoding="utf-8")  # noqa: ASYNC230 -- long-lived log handle handed to the bridge subprocess
-            node = find_node_executable("node")
+            node = _wenv(bridge_access.NODE_ENV) or find_node_executable("node")
             if node is None:
                 raise RuntimeError("Node.js is no longer available; run `hermes pm install`")
             self._bridge_process = subprocess.Popen(  # noqa: ASYNC220 -- persistent bridge; callers use the Popen object (pid, poll)
                 [node, str(bridge_path), "--port", str(self._bridge_port), "--session", str(self._session_path),
-                 "--mode", _wenv("WHATSAPP_MODE", "self-chat")], stdin=subprocess.DEVNULL, stdout=bridge_log_fh, stderr=bridge_log_fh, env=self._bridge_env(), **windows_detach_popen_kwargs())
+                 "--mode", _wenv("WHATSAPP_MODE", "self-chat")], stdin=subprocess.DEVNULL, stdout=bridge_log_fh, stderr=bridge_log_fh, env=self._bridge_env(),
+                **bridge_access.popen_identity(_wenv(bridge_access.USER_ENV)), **windows_detach_popen_kwargs())
             _write_bridge_pidfile(self._session_path, self._bridge_process.pid, self._bridge_port)
             if not await self._wait_for_bridge():
                 return False
@@ -819,9 +836,10 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         if not os.path.exists(file_path):
             return SendResult(success=False, error=f"File not found: {file_path}")
         jid = to_whatsapp_jid(chat_id)
-        payload: dict[str, Any] = {"chatId": jid, "filePath": file_path, "mediaType": media_type}
-        payload.update({k: v for k, v in (("caption", caption), ("fileName", file_name)) if v})
-        result = await self._post_bridge_message("send-media", payload, timeout=120)
+        with bridge_access.spooled(file_path, _wenv(bridge_access.SPOOL_ENV)) as sendable_path:
+            payload: dict[str, Any] = {"chatId": jid, "filePath": sendable_path, "mediaType": media_type}
+            payload.update({k: v for k, v in (("caption", caption), ("fileName", file_name)) if v})
+            result = await self._post_bridge_message("send-media", payload, timeout=120)
         if result.success and result.message_id:
             # A later quote of this attachment carries only a thumbnail stub; the bridge's cache
             # knows inbound media only, so index our own sends (the cron-delivered image case).
@@ -1119,7 +1137,7 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
             return payload
 
         last_message_id = None
-        async with aiohttp.ClientSession() as session:
+        async with aiohttp.ClientSession(headers=bridge_access.auth_headers(_wenv(bridge_access.TOKEN_ENV))) as session:
             # Whose bridge holds the port is checked before anything is posted: on a shared port another profile's
             # bridge would deliver from that profile's WhatsApp account. A bridge without ``session`` predates the field.
             async with session.get(
@@ -1166,10 +1184,11 @@ async def _standalone_send(pconfig, chat_id, message, *, thread_id=None, media_f
                             logger.warning("WhatsApp caption-fallback send failed for missing media")
                     return send_error(f"WhatsApp media file not found: {media_path}")
                 media_type = _bridge_media_type(media_path, is_voice, force_document)
-                payload: dict[str, Any] = {"chatId": normalized_chat_id, "filePath": media_path, "mediaType": media_type}
-                payload.update({k: v for k, v in (("fileName", os.path.basename(media_path) if media_type == "document" else None), ("caption", media_caption)) if v})
-                payload = _mention_first_payload(payload)
-                mid, err = await _post("send-media", payload, 120, "media")
+                with bridge_access.spooled(media_path, _wenv(bridge_access.SPOOL_ENV)) as sendable_path:
+                    payload: dict[str, Any] = {"chatId": normalized_chat_id, "filePath": sendable_path, "mediaType": media_type}
+                    payload.update({k: v for k, v in (("fileName", os.path.basename(media_path) if media_type == "document" else None), ("caption", media_caption)) if v})
+                    payload = _mention_first_payload(payload)
+                    mid, err = await _post("send-media", payload, 120, "media")
                 if err:
                     return err
                 last_message_id = mid or last_message_id
