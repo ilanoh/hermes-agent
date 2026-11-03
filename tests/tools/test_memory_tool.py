@@ -959,6 +959,59 @@ class TestBackgroundReviewDeleteGate:
         assert result["success"] is True
         assert "entry a supervised turn may remove" not in store._entries_for("memory")
 
+    @pytest.mark.parametrize("target", ["memory", "user"])
+    def test_background_consolidation_opt_out_applies_batch_without_staging(self, store, tmp_path, monkeypatch, target):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "config.yaml").write_text(
+            "memory:\n  background_consolidation_approval: false\n  write_approval: false\n",
+            encoding="utf-8",
+        )
+        store.add(target, "old environment fact")
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(memory_tool(target=target, operations=[
+                {"action": "remove", "old_text": "old environment fact"},
+                {"action": "add", "content": "current environment fact"},
+            ], store=store))
+        finally:
+            reset_current_write_origin(token)
+        assert result["success"] is True
+        assert not result.get("staged"), result
+        assert store._entries_for(target) == ["current environment fact"]
+        from tools.write_approval import MEMORY, pending_count
+        assert pending_count(MEMORY) == 0
+
+    @pytest.mark.parametrize("action", ["replace", "remove"])
+    def test_opt_out_applies_single_destructive_op(self, store, tmp_path, monkeypatch, action):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "config.yaml").write_text(
+            "memory:\n  background_consolidation_approval: false\n  write_approval: false\n",
+            encoding="utf-8",
+        )
+        store.add("memory", "old fact")
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(memory_tool(action=action, old_text="old fact", content="new fact", store=store))
+        finally:
+            reset_current_write_origin(token)
+        assert result["success"] and not result.get("staged"), result
+        assert store.memory_entries == (["new fact"] if action == "replace" else [])
+
+    def test_opt_out_does_not_override_general_write_approval(self, store, tmp_path, monkeypatch):
+        monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+        (tmp_path / "config.yaml").write_text(
+            "memory:\n  background_consolidation_approval: false\n  write_approval: true\n",
+            encoding="utf-8",
+        )
+        store.add("memory", "original fact")
+        token = set_current_write_origin("background_review")
+        try:
+            result = json.loads(memory_tool(action="replace", old_text="original fact", content="new fact", store=store))
+        finally:
+            reset_current_write_origin(token)
+        assert result.get("staged"), result
+        assert store.memory_entries == ["original fact"]
+
     def test_attended_review_keeps_full_operation_set(self, store):
         # A user-requested /refine fork keeps the background_review origin (skill guards still
         # apply) but is attended, so replace/remove keep working on that supervised surface.

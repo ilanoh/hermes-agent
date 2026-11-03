@@ -317,8 +317,14 @@ This is the answer to "the agent saved a wrong assumption about me": set
 `write_approval: true`, and every save — especially the unprompted background
 ones — waits for your yes/no before it ever enters your profile.
 
-A staged `replace` or `remove` (the background review stages these even with the
-gate off) records the full entry it targets, and `/memory pending` shows it.
+A staged `replace` or `remove` records the full entry it targets, and
+`/memory pending` shows it. Background review stages these by default even with
+`write_approval: false`. On this local install, operators can explicitly allow
+automatic background consolidation with
+`hermes config set memory.background_consolidation_approval false`.
+The general `memory.write_approval` gate still applies; set both gates to false
+for automatic memory additions, replacements and removals. Store validation,
+size limits and atomic batch protection remain enabled.
 Approval applies to exactly that entry: if it changed after the write was staged,
 the write is refused and stays pending for you to reject. A `replace`/`remove`
 staged before this pinning existed has no verifiable target and is refused too:
