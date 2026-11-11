@@ -1,0 +1,7 @@
+# The Python of voice_transcriber.js: the versions the Hermes gateway's own Whisper runs.
+# av 19 drops the open() argument faster-whisper 1.2.1 passes, so av stays on 18.
+faster-whisper==1.2.1
+ctranslate2==4.8.2
+av==18.1.0
+onnxruntime==1.29.0
+tokenizers==0.23.1
