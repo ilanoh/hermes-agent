@@ -3,8 +3,8 @@
  * webhook routing: a person on the server's numbers list who answers by voice
  * is read like one who types.
  *
- * Runs transcribe_voice.py with a Python that has faster-whisper installed,
- * as the bridge's own account, on the CPU. The model is a local folder, so
+ * Runs transcribe_voice.py with a Python that has whisper-requirements.txt
+ * installed, as the bridge's own account, on the CPU. The model is a local folder, so
  * nothing is downloaded and no audio leaves the machine.
  *
  * Off unless both are set:
