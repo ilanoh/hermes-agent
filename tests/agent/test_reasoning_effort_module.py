@@ -139,8 +139,8 @@ class TestGlm52Vocabulary:
 
 class TestGlm54Vocabulary:
     def test_three_level_set_without_medium(self):
-        """api.z.ai/api/paas/v4 rejects medium for GLM-5.4: it clamps down to low, never up."""
-        assert clamp_effort("medium", GLM54_EFFORTS, GLM54_OVERRIDES) == "low"
+        """api.z.ai/api/paas/v4 rejects medium for GLM-5.4: it rounds up to high."""
+        assert clamp_effort("medium", GLM54_EFFORTS, GLM54_OVERRIDES) == "high"
         assert clamp_effort("minimal", GLM54_EFFORTS, GLM54_OVERRIDES) == "low"
         assert clamp_effort("xhigh", GLM54_EFFORTS, GLM54_OVERRIDES) == "max"
         assert clamp_effort("ultra", GLM54_EFFORTS, GLM54_OVERRIDES) == "max"

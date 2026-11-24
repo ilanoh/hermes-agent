@@ -215,7 +215,7 @@ class TestZaiGLM54ReasoningEffort:
         ("effort", "expected"),
         [
             ("low", "low"),
-            ("medium", "low"),
+            ("medium", "high"),
             ("high", "high"),
             ("max", "max"),
             ("xhigh", "max"),
@@ -295,7 +295,7 @@ class TestZaiFullKwargsIntegration:
     @pytest.mark.parametrize("model,reasoning,thinking,effort", [
         ("glm-5.3-flash", {"enabled": False}, "enabled", "low"),
         ("glm-5.4", {"enabled": False}, "enabled", "low"),
-        ("glm-5.4", {"enabled": True, "effort": "medium"}, "enabled", "low"),
+        ("glm-5.4", {"enabled": True, "effort": "medium"}, "enabled", "high"),
         ("glm-5.2", {"enabled": False}, "disabled", None),
         ("glm-5.3", None, None, None),
     ])
