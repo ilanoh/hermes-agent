@@ -334,11 +334,11 @@ DEFAULT_CONTEXT_LENGTHS = {
     "minimax-m3": 1000000, "minimax": 204800,
     # GLM — 5.3 / -flash / -flashx 1,048,576: Zhipu documents "1M" and the Nous, OpenRouter and NanoGPT
     # (?detailed=true) catalogs all list exactly 1,048,576 (2026-11-18; the old 1,310,720 overstated, #154406);
-    # 5.2 1,048,576; 5 / 5.1 / 4.7 / 4.6 204,800; *-turbo / 4.7-flash 202,752 (the catch-all).
-    # The OpenRouter :free variant is capped; the longer key wins.
+    # 5.4 1,000,000 (models.dev zai-coding-plan, 2026-11-24; its zai catalog has no 5.4); 5.2 1,048,576;
+    # 5 / 5.1 / 4.7 / 4.6 204,800; *-turbo / 4.7-flash 202,752 (the catch-all). OpenRouter :free is capped.
     "glm-5.3": 1_048_576, "glm-5.3-flash": 1_048_576, "glm-5.3:batch": 1_048_576, "glm-5.3:us": 1_048_576,
     "glm-5.3-flash:batch": 1_048_576, "glm-5.3-flash:us": 1_048_576, "glm-5.3-flashx": 1_048_576,
-    "glm-5.2": 1_048_576, "glm-5.2:free": 256_000,
+    "glm-5.4": 1_000_000, "glm-5.2": 1_048_576, "glm-5.2:free": 256_000,  # the longer key wins
     "glm-5.1": 204_800, "glm-5-turbo": 202752, "glm-5v-turbo": 202752, "glm-5": 204_800,
     "glm-4.7-flash": 202752, "glm-4.7": 204_800, "glm-4.6v": 131072, "glm-4.6": 204_800, "glm": 202752,
     # xAI — /v1/models returns no context_length, so these prevent probe-down on api.x.ai

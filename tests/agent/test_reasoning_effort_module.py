@@ -20,6 +20,8 @@ from agent.reasoning_effort import (
     EFFORT_LADDER,
     GLM52_EFFORTS,
     GLM52_OVERRIDES,
+    GLM54_EFFORTS,
+    GLM54_OVERRIDES,
     KIMI_K2_EFFORTS,
     KIMI_K3_EFFORTS,
     KIMI_K3_OVERRIDES,
@@ -133,6 +135,16 @@ class TestGlm52Vocabulary:
         # GLM's floor is high — weaker asks land there.
         assert clamp_effort("low", GLM52_EFFORTS, GLM52_OVERRIDES) == "high"
         assert clamp_effort("medium", GLM52_EFFORTS, GLM52_OVERRIDES) == "high"
+
+
+class TestGlm54Vocabulary:
+    def test_three_level_set_without_medium(self):
+        """api.z.ai/api/paas/v4 rejects medium for GLM-5.4: it clamps down to low, never up."""
+        assert clamp_effort("medium", GLM54_EFFORTS, GLM54_OVERRIDES) == "low"
+        assert clamp_effort("minimal", GLM54_EFFORTS, GLM54_OVERRIDES) == "low"
+        assert clamp_effort("xhigh", GLM54_EFFORTS, GLM54_OVERRIDES) == "max"
+        assert clamp_effort("ultra", GLM54_EFFORTS, GLM54_OVERRIDES) == "max"
+        assert "none" not in GLM54_EFFORTS
 
 
 class TestCodexVocabulary:

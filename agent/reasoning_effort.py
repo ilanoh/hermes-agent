@@ -78,6 +78,11 @@ GLM52_OVERRIDES: dict[str, str] = {"xhigh": "max"}
 # reasoning-token scaling (low=4, medium=11, : high=98, max=125 on the probe prompt).
 GLM53_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "max")
 GLM53_OVERRIDES: dict[str, str] = {"xhigh": "max"}
+#: GLM-5.4 drops ``medium``: api.z.ai/api/paas/v4 answers 1210 ("always engages in thinking and
+#: cannot be disabled; please use low, high, or max") to ``medium`` and to disabled thinking (live
+#: 2026-11-24). The coding plan endpoint accepts every level; this set is the one both accept.
+GLM54_EFFORTS: tuple[str, ...] = ("low", "high", "max")
+GLM54_OVERRIDES: dict[str, str] = {"xhigh": "max"}
 
 #: DeepSeek V4 OpenAI-compat endpoint; ``xhigh`` requests the top tier.
 DEEPSEEK_V4_EFFORTS: tuple[str, ...] = ("low", "medium", "high", "max")

@@ -1,7 +1,7 @@
 """ZAI / GLM provider profile.
 
 GLM-4.5+ defaults to thinking ON, so ``reasoning_config`` is translated to
-``extra_body.thinking``; GLM-5.2/5.3 also take a native ``reasoning_effort``.
+``extra_body.thinking``; GLM-5.2/5.3/5.4 also take a native ``reasoning_effort``.
 """
 
 import re
@@ -13,8 +13,11 @@ from providers.base import ProviderProfile
 
 _GLM_VERSION_RE = re.compile(r"^glm-(\d+)(?:\.(\d+))?")
 # Alias spellings seen on relays (Fireworks ``glm-5p2``, ``zai-org-glm-5-2``…).
+_GLM_5_4_TOKENS = ("glm-5.4", "glm-5-4", "glm-5p4")
 _GLM_5_3_TOKENS = ("glm-5.3", "glm-5-3", "glm-5p3")
-_GLM_5_2_TOKENS = ("glm-5.2", "glm-5-2", "glm-5p2") + _GLM_5_3_TOKENS
+_GLM_5_2_TOKENS = ("glm-5.2", "glm-5-2", "glm-5p2") + _GLM_5_3_TOKENS + _GLM_5_4_TOKENS
+# Models that reject thinking.type=disabled (HTTP 400 / 1210).
+_GLM_THINKING_ONLY_TOKENS = _GLM_5_3_TOKENS + _GLM_5_4_TOKENS
 
 
 def _model_supports_thinking(model: str | None) -> bool:
@@ -29,12 +32,14 @@ def _has_token(model: str | None, tokens: tuple[str, ...]) -> bool:
 
 
 def _glm_5_2_reasoning_effort(reasoning_config: dict | None, *, model: str | None = None) -> str | None:
-    """Hermes effort -> GLM vocabulary (5.2: high/max; 5.3: low..max). Below-floor
-    efforts clamp to the floor; disabled/unset leaves the server default."""
+    """Hermes effort -> GLM vocabulary (5.2: high/max; 5.3: low..max; 5.4: low/high/max).
+    Below-floor efforts clamp to the floor; disabled/unset leaves the server default."""
     effort = re_.requested_effort(reasoning_config)
     if effort is None or effort == "none":
         return None
-    if _has_token(model, _GLM_5_3_TOKENS):
+    if _has_token(model, _GLM_5_4_TOKENS):
+        efforts, overrides, floor = re_.GLM54_EFFORTS, re_.GLM54_OVERRIDES, "low"
+    elif _has_token(model, _GLM_5_3_TOKENS):
         efforts, overrides, floor = re_.GLM53_EFFORTS, re_.GLM53_OVERRIDES, "low"
     else:
         efforts, overrides, floor = re_.GLM52_EFFORTS, re_.GLM52_OVERRIDES, "high"
@@ -56,8 +61,8 @@ class ZaiProfile(ProviderProfile):
         # Only emit when the user expressed a preference (server default = enabled).
         if isinstance(reasoning_config, dict):
             enabled = reasoning_config.get("enabled") is not False
-            if not enabled and _has_token(model, _GLM_5_3_TOKENS):
-                # GLM-5.3 rejects disabled thinking; low is its lightest supported mode.
+            if not enabled and _has_token(model, _GLM_THINKING_ONLY_TOKENS):
+                # GLM-5.3 and GLM-5.4 reject disabled thinking; low is their lightest supported mode.
                 enabled = True
                 top_level["reasoning_effort"] = "low"
             # Preserved Thinking: with thinking on, the standard endpoint drops replayed prior-turn
