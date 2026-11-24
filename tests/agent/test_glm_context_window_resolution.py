@@ -13,6 +13,13 @@ def test_hyphenated_relay_slug_resolves_to_specific_catalog_entry():
     assert DEFAULT_CONTEXT_LENGTHS["glm-5.3"] > DEFAULT_CONTEXT_LENGTHS["glm"]
 
 
+def test_glm_5_4_on_the_zai_coding_plan_resolves_to_its_1m_window():
+    """models.dev's zai catalog lacks glm-5.4, which used to fall to the glm-5 204,800 catch-all."""
+    ctx = get_model_context_length("glm-5.4", base_url="https://api.z.ai/api/coding/paas/v4", provider="zai")
+    assert ctx == DEFAULT_CONTEXT_LENGTHS["glm-5.4"] == 1_000_000
+    assert ctx > DEFAULT_CONTEXT_LENGTHS["glm-5"]
+
+
 def test_entry_level_custom_provider_context_length_backs_models_without_per_model_override():
     providers = [{"name": "relay", "base_url": "https://relay.example/v1", "context_length": 1_000_000,
                   "models": {"pinned": {"context_length": 65536}}}]

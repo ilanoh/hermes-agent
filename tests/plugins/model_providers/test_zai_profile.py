@@ -204,6 +204,53 @@ class TestZaiGLM53ReasoningEffort:
 
 
 
+class TestZaiGLM54ReasoningEffort:
+    """GLM-5.4's low/high/max effort scale.
+
+    Live on api.z.ai/api/paas/v4 (2026-11-24): ``medium`` and disabled thinking answer 1210
+    ("please use low, high, or max"); the coding plan endpoint accepts every level.
+    """
+
+    @pytest.mark.parametrize(
+        ("effort", "expected"),
+        [
+            ("low", "low"),
+            ("medium", "low"),
+            ("high", "high"),
+            ("max", "max"),
+            ("xhigh", "max"),
+            ("minimal", "low"),
+        ],
+    )
+    def test_efforts_land_on_the_three_accepted_levels(self, zai_profile, effort, expected):
+        extra_body, top_level = zai_profile.build_api_kwargs_extras(
+            reasoning_config={"enabled": True, "effort": effort},
+            model="glm-5.4",
+        )
+        assert extra_body == {"thinking": {"type": "enabled", "clear_thinking": False}}
+        assert top_level == {"reasoning_effort": expected}
+
+    @pytest.mark.parametrize(
+        "model",
+        ["glm-5.4", "z-ai/glm-5.4", "glm-5-4", "glm-5p4", "zai-org-glm-5-4"],
+    )
+    def test_disabled_becomes_enabled_plus_low(self, zai_profile, model):
+        extra_body, top_level = zai_profile.build_api_kwargs_extras(
+            reasoning_config={"enabled": False},
+            model=model,
+        )
+        assert extra_body == {"thinking": {"type": "enabled", "clear_thinking": False}}
+        assert top_level == {"reasoning_effort": "low"}
+
+    def test_glm_5_3_keeps_medium(self, zai_profile):
+        """The 5.4 narrowing must not leak into 5.3's four-level wire."""
+        _, top_level = zai_profile.build_api_kwargs_extras(
+            reasoning_config={"enabled": True, "effort": "medium"},
+            model="glm-5.3",
+        )
+        assert top_level == {"reasoning_effort": "medium"}
+
+
 class TestZaiModelGating:
     """GLM 4.5+ get thinking; earlier GLM models are left untouched."""
 
@@ -247,6 +294,8 @@ class TestZaiFullKwargsIntegration:
 
     @pytest.mark.parametrize("model,reasoning,thinking,effort", [
         ("glm-5.3-flash", {"enabled": False}, "enabled", "low"),
+        ("glm-5.4", {"enabled": False}, "enabled", "low"),
+        ("glm-5.4", {"enabled": True, "effort": "medium"}, "enabled", "low"),
         ("glm-5.2", {"enabled": False}, "disabled", None),
         ("glm-5.3", None, None, None),
     ])
