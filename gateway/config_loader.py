@@ -205,6 +205,7 @@ def _str_keyed(value: Any) -> Any:
 
 _TELEGRAM = frozenset({Platform.TELEGRAM})
 _DISCORD_SLACK = frozenset({Platform.DISCORD, Platform.SLACK})
+_GROUP_OBSERVERS = frozenset({Platform.TELEGRAM, Platform.WHATSAPP})
 
 def _plain(*keys: str) -> tuple:
     """Keys copied verbatim into ``extra`` for every platform."""
@@ -221,7 +222,7 @@ _SHARED_KEYS: tuple = (
     ("group_allowed_chats", _TELEGRAM, None),
     ("allowed_topics", _TELEGRAM, None),
     *_plain("free_response_channels", "mention_patterns", "voice_mention_patterns", "exclusive_bot_mentions"),
-    ("observe_unmentioned_group_messages", _TELEGRAM, None),
+    ("observe_unmentioned_group_messages", _GROUP_OBSERVERS, None),
     *_plain(
         "dm_policy", "allow_from", "allow_admin_from", "user_allowed_commands",
         "group_policy", "group_allow_from", "group_allow_admin_from", "group_user_allowed_commands",

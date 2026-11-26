@@ -692,6 +692,29 @@ async def spoken_mention_clips(paths: list[str], patterns, *, adapter: Any = Non
     return []
 
 
+async def transcribe_observed_clips(paths: list[str], *, adapter: Any = None, source: Any = None) -> list[str]:
+    """One transcript note per clip of an observed (unaddressed) group voice note, so the chatter a later
+    turn reads keeps what was said. STT runs in the profile *source* routes to, never when that profile
+    disables it or the sender would be refused; then each clip keeps a neutral note with its path."""
+    from gateway.run_inbound_transcription import GatewayInboundTranscriptionMixin, stt_enabled_for_turn, transcribe_one_clip
+    notes: list[str] = []
+    async with _gate_stt_scope(adapter, source):
+        from tools.transcription_tools import is_stt_enabled
+        enabled = stt_enabled_for_turn(getattr(adapter, "gateway_runner", None)) \
+            and _sender_may_use_bot(adapter, source) and await asyncio.to_thread(is_stt_enabled)
+        for path in paths:
+            if not enabled:
+                notes.append(GatewayInboundTranscriptionMixin._untranscribed_audio_note(path))
+                continue
+            try:
+                _text, note = await transcribe_one_clip(path)
+            except Exception as exc:  # health: allow BLE001 -- an STT failure keeps the neutral note
+                logger.warning("Observed voice note could not be transcribed %s: %s", path, exc)
+                note = GatewayInboundTranscriptionMixin._untranscribed_audio_note(path)
+            notes.append(note)
+    return notes
+
+
 class ChatOrderedWork:
     """Inbound work that may wait on gate-time STT runs off the platform's single reader, FIFO per
     chat: a slow voice note delays only its own chat, and a message sent after it in that chat

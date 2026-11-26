@@ -22,7 +22,7 @@ from hermes_cli._subprocess_compat import windows_detach_flags
 from hermes_cli.process_identity import release_process_group_once_empty, spawn_owned
 from hermes_constants import (ensure_private_store, find_node_executable, get_hermes_dir, with_hermes_node_path)
 
-from . import bridge_access
+from . import bridge_access, group_observe
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -1375,6 +1375,10 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 await asyncio.sleep(5)
             await asyncio.sleep(1)  # Poll interval
 
+    def _text_batch_key(self, event: MessageEvent) -> str:
+        """The mixin's batching key plus the sender, so two observed-group members never merge into one turn."""
+        return super()._text_batch_key(event) + group_observe.shared_sender_suffix(event)
+
     async def _process_inbound(self, msg_data: dict[str, Any]) -> None:
         event = await self._build_message_event(msg_data)
         if event:
@@ -1516,6 +1520,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
         try:
             clips: list[str] = []
             if not self._should_process_message(data) and not (clips := await self._spoken_mention_clips(data)):
+                await group_observe.observe_group_message(self, data)
                 return None
             msg_type = self._classify_bridge_message(data)
             source = self.build_source(chat_id=data.get("chatId", ""), chat_name=data.get("chatName"), chat_type="group" if data.get("isGroup", False) else "dm",
@@ -1549,7 +1554,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 metadata["whatsapp_from_owner"] = True
                 if not body.startswith(_OWNER_REPLY_PREFIX):
                     body = f"{_OWNER_REPLY_PREFIX}{body}"
-            return MessageEvent(
+            return group_observe.apply_attribution(self, MessageEvent(
                 text=body, message_type=msg_type, source=source, raw_message=data, message_id=data.get("messageId"),
                 media_urls=cached_urls, media_types=media_types, media_text_inlined=media_text_inlined, metadata=metadata,
                 reply_to_message_id=str(raw_reply_id) if raw_reply_id is not None else None,
@@ -1557,7 +1562,7 @@ class WhatsAppAdapter(WhatsAppBehaviorMixin, BasePlatformAdapter):
                 reply_to_author_id=(self._normalize_whatsapp_id(data.get("quotedParticipant")) or None) if quoted else None,
                 reply_to_is_own_message=self._message_is_reply_to_bot(data) if quoted else False,
                 reply_expected=True if clips else None,  # a spoken wake word addressed the bot
-            )
+            ))
         except Exception as e:
             print(f"[{self.name}] Error building event: {e}")
             return None
